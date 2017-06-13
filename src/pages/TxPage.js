@@ -1,49 +1,66 @@
-import React, { Component } from 'react'
-import { connect } from 'react-redux'
-import { RaisedButton } from 'material-ui'
+import React, {Component} from 'react'
+import {connect} from 'react-redux'
+import {RaisedButton} from 'material-ui'
 import TxForm from '../components/forms/TxForm'
-import { transaction } from '../redux/tx/tx'
+import {transaction} from '../redux/tx/tx'
 
 const mapStateToProps = (state) => ({
   isWalletUploaded: !!state.get('tx').wallet,
-  wallet: state.get('tx').wallet
+  wallet: state.get('tx').wallet,
+  urls: state.get('tx').urls,
+  remaining: state.get('tx').remaining,
+  result: state.get('tx').result
 })
 
 const mapDispatchToProps = (dispatch) => ({
-  tx: (value, data, gasPrice, block, wallet, password) => dispatch(transaction(value, data, gasPrice, block, wallet, password))
+  tx: (urls, from, to, value, data, gasPrice, block, wallet, password) => dispatch(transaction(urls, from, to, value, data, gasPrice, block, wallet, password))
 })
 
 @connect(mapStateToProps, mapDispatchToProps)
 class TxPage extends Component {
   handleSubmit = (values) => {
     this.props.tx(
+      this.props.urls,
+      this.props.wallet.address,
+      values.get('to'),
       values.get('value'),
       values.get('data'),
       values.get('gasPrice'),
       values.get('block'),
       this.props.wallet,
-      values.get('password'),
+      values.get('password')
     )
-    console.log('submit', values)
   }
 
   handleSend = () => {
     this.refs.txForm.getWrappedInstance().submit()
   }
 
-  render () {
+  handleReset = () => {
+    window.location.reload()
+  }
+
+  render() {
     return (
       <div style={{width: '600px', margin: '50px auto 0'}}>
-        <TxForm ref='txForm' onSubmit={this.handleSubmit} />
+        <TxForm ref='txForm' onSubmit={this.handleSubmit}/>
 
-        <RaisedButton
+        {this.props.result === null ? (this.props.remaining === null ? <RaisedButton
           label={'Send'}
           style={{margin: '30px 0 0'}}
           primary
           fullWidth
           disabled={!this.props.isWalletUploaded}
-          onTouchTap={this.handleSend} />
-
+          onTouchTap={this.handleSend}/> : (
+          <p style={{textAlign: 'center'}}>
+            {this.props.remaining > 0 ? (this.props.remaining + ' blocks remaining') : 'Processing...'}
+          </p>
+        )) : (<div style={{marginTop: '35px'}}>
+          {this.props.result.valueSeq().map(([url, r]) => (
+            <p key={url}><b>{url}</b>: <br/>{r}</p>
+          ))}
+          <RaisedButton label={'Reset'} style={{margin: '30px 0 0'}} fullWidth onTouchTap={this.handleReset}/>
+        </div>)}
       </div>
     )
   }

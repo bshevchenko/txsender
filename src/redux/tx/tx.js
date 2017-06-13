@@ -1,46 +1,46 @@
 import Immutable from 'immutable'
 import Web3 from 'web3'
 import walletProvider from '../../network/walletProvider'
+import Web3Provider from '../../network/Web3Provider'
 
 const TX_SET_WALLET = 'tx/SET_WALLET'
-const TX_QUERY = 'tx/QUERY'
-const TX_ERROR = 'tx/ERROR'
-const TX_SUCCESS = 'tx/SUCCESS'
+const TX_TOGGLE_URL = 'tx/TOGGLE_URL'
+const TX_REMAINING = 'tx/REMAINING'
+const TX_RESULT = 'tx/RESULT'
+
+const BLOCK_DELAY = 2
 
 const initialState = {
   wallet: null,
-  list: new Immutable.List()
+  remaining: null,
+  result: null,
+  urls: new Immutable.Map({
+    'https://mainnet.infura.io/PVe9zSjxTKIP3eAuAHFA': 1
+  })
 }
 
-let index = 0
-let filterInitialized = false
-
 export default (state = initialState, action) => {
-  let tx
   switch (action.type) {
     case TX_SET_WALLET:
       return {
         ...state,
         wallet: action.wallet
       }
-    case TX_QUERY:
+    case TX_REMAINING:
       return {
         ...state,
-        list: state.list.set(action.id, {block: action.block, callback: action.callback})
+        remaining: action.remaining
       }
-    case TX_ERROR:
-      tx = state.list.get(action.id)
-      tx.error = action.error
+    case TX_RESULT:
       return {
         ...state,
-        list: state.list.set(action.id, tx)
+        result: action.result,
+        remaining: null
       }
-    case TX_SUCCESS:
-      tx = state.list.get(action.id)
-      tx.hash = action.hash
+    case TX_TOGGLE_URL:
       return {
         ...state,
-        list: state.list.set(action.id, tx)
+        urls: state.urls.set(action.url, action.add)
       }
     default:
       return state
@@ -48,48 +48,73 @@ export default (state = initialState, action) => {
 }
 
 export const setWallet = (wallet) => ({type: TX_SET_WALLET, wallet})
+export const toggleURL = (url, add) => ({type: TX_TOGGLE_URL, url, add})
 
-export const transaction = (value, data, gasPrice, block, wallet, password) => (dispatch, getState) => {
-  const urls = [
-    'https://mainnet.infura.io/PVe9zSjxTKIP3eAuAHFA'
-  ]
+export const transaction = (urls, from, to, value, data, gasPrice, block, wallet, password) => async (dispatch) => {
+  urls = Object.keys(urls.toJS())
+
+  dispatch({type: TX_REMAINING, remaining: 0}) // show processing...
+
+  let first = true
+  let remaining = urls.length
+
+  let result = new Immutable.List()
 
   for (let url of urls) {
-    const provider = walletProvider(wallet, password, url)
+    let provider
+    try {
+      provider = walletProvider(wallet, password, url)
+    } catch (error) {
+      result = result.push([url, error.toString()])
+      remaining--
+      if (remaining === 0) {
+        dispatch({type: TX_RESULT, result})
+      }
+      continue
+    }
+
     const web3 = new Web3()
     web3.setProvider(provider)
 
-    if (!filterInitialized) {
-      web3.eth.filter('latest').watch(async (e, r) => {
-        if (e) {
-          return
-        }
-        const currentBlock = r // TODO block number or hash?
-        console.log('block', currentBlock)
+    Web3Provider.setWeb3(web3)
 
-        const list = getState().get('tx').get('list').toArray()
-
-        for (let {block, callback} of list) {
-          if (block - currentBlock <= 2) {
-            callback()
-          }
-        }
-      })
+    if (first) {
+      const currentBlock = await Web3Provider.getBlockNumber()
+      dispatch({type: TX_REMAINING, remaining: block - currentBlock - BLOCK_DELAY})
     }
-
-    index++
-    const id = index
 
     const callback = () => {
-      web3.eth.sendTransaction({value, gasPrice, data}, function(error, hash) {
+      web3.eth.sendTransaction({from, to, value, gasPrice, data}, function (error, hash) {
         if (error) {
-          dispatch({type: TX_ERROR, id, error})
-          return
+          result = result.push([url, error.toString()])
+        } else {
+          result = result.push([url, hash])
         }
-        dispatch({type: TX_SUCCESS, id, hash})
+        remaining--
+        if (remaining === 0) {
+          dispatch({type: TX_RESULT, result})
+        }
       })
     }
 
-    dispatch({type: TX_QUERY, id, block, callback})
+    const filter = web3.eth.filter('latest')
+    filter.watch(async (e, r) => {
+      if (e) {
+        return
+      }
+      const blockData = await Web3Provider.getBlock(r, true)
+      const currentBlock = blockData.number
+
+      if (first) {
+        dispatch({type: TX_REMAINING, remaining: block - currentBlock - BLOCK_DELAY})
+      }
+
+      if (true || block - currentBlock <= BLOCK_DELAY) { // TODO
+        filter.stopWatching(() => {})
+        callback()
+      }
+    })
+
+    first = false
   }
 }
