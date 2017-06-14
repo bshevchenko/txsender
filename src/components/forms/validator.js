@@ -4,7 +4,7 @@ export const required = (value) => {
 
 export const address = (value, required = true) => {
   if ((!value && required) || (value && !/^0x[0-9a-f]{40}$/i.test(value))) {
-    return 'errors.invalidAddress'
+    return 'Should be valid ethereum address'
   }
   return null
 }
@@ -34,7 +34,7 @@ export const url = (value, required = true) => {
 
 export const positiveInt = value => {
   if (!/^[1-9][\d]*$/.test(value)) {
-    return 'errors.invalidPositiveNumber'
+    return 'Should be valid positive integer'
   }
   return null
 }
@@ -49,8 +49,11 @@ export const between = (value, min, max, required = true) => {
   return null
 }
 
-export const positiveNumber = value => {
-  return isNaN(value) || !(value > 0) ? 'errors.invalidPositiveNumber' : null
+export const positiveNumberOrZero = (value, required = true) => {
+  if (!required && !value) {
+    return null
+  }
+  return isNaN(value) || !(value >= 0) ? 'Should be positive number or zero' : null
 }
 
 export const currencyNumber = (value, decimals) => {
@@ -78,7 +81,7 @@ export default {
   url,
   positiveInt,
   between,
-  positiveNumber,
+  positiveNumberOrZero,
   currencyNumber,
   lowerThan
 }

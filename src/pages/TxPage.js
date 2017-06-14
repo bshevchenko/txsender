@@ -13,7 +13,7 @@ const mapStateToProps = (state) => ({
 })
 
 const mapDispatchToProps = (dispatch) => ({
-  tx: (urls, from, to, value, data, gasPrice, block, wallet, password) => dispatch(transaction(urls, from, to, value, data, gasPrice, block, wallet, password))
+  tx: (urls, from, to, value, data, block, wallet, password) => dispatch(transaction(urls, from, to, value, data, block, wallet, password))
 })
 
 @connect(mapStateToProps, mapDispatchToProps)
@@ -25,7 +25,6 @@ class TxPage extends Component {
       values.get('to'),
       values.get('value'),
       values.get('data'),
-      values.get('gasPrice'),
       values.get('block'),
       this.props.wallet,
       values.get('password')
@@ -52,12 +51,12 @@ class TxPage extends Component {
           fullWidth
           disabled={!this.props.isWalletUploaded}
           onTouchTap={this.handleSend}/> : (
-          <p style={{textAlign: 'center'}}>
-            {this.props.remaining > 0 ? (this.props.remaining + ' blocks remaining') : 'Processing...'}
+          <p style={{textAlign: 'center', marginTop: '40px'}}>
+            {this.props.remaining > 0 ? (this.props.remaining + ' blocks remaining...') : 'Processing...'}
           </p>
         )) : (<div style={{marginTop: '35px'}}>
           {this.props.result.valueSeq().map(([url, r]) => (
-            <p key={url}><b>{url}</b>: <br/>{r}</p>
+            <p key={url}><b>{url}</b>: <br/><a href={'https://etherscan.io/tx/' + r} target='_blank'>{r}</a></p>
           ))}
           <RaisedButton label={'Reset'} style={{margin: '30px 0 0'}} fullWidth onTouchTap={this.handleReset}/>
         </div>)}

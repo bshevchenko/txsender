@@ -2,21 +2,39 @@ import Immutable from 'immutable'
 import Web3 from 'web3'
 import walletProvider from '../../network/walletProvider'
 import Web3Provider from '../../network/Web3Provider'
+import { store } from '../configureStore'
+import axios from 'axios'
 
 const TX_SET_WALLET = 'tx/SET_WALLET'
 const TX_TOGGLE_URL = 'tx/TOGGLE_URL'
+const TX_NEW_BLOCK = 'tx/NEW_BLOCK'
+const TX_PRICES = 'tx/PRICES'
+const TX_ERROR = 'tx/ERROR'
 const TX_REMAINING = 'tx/REMAINING'
 const TX_RESULT = 'tx/RESULT'
+const TX_PRICES_FETCH = 'tx/PRICES_FETCH'
 
-const BLOCK_DELAY = 2
+const PRIMARY_URL = 'https://mainnet.infura.io/PVe9zSjxTKIP3eAuAHFA'
 
 const initialState = {
   wallet: null,
   remaining: null,
   result: null,
+  block: '...',
   urls: new Immutable.Map({
-    'https://mainnet.infura.io/PVe9zSjxTKIP3eAuAHFA': 1
-  })
+    [PRIMARY_URL]: 1 /** PUT YOUR URLS HERE */
+  }),
+  pricesFetch: false,
+  error: null,
+  value: null,
+  valuePrice: null,
+  txPrice: null,
+  totalPrice: null,
+  multiTotalPrice: null,
+  usdRate: null,
+  txEthPrice: null,
+  totalEthPrice: null,
+  multiTotalEthPrice: null
 }
 
 export default (state = initialState, action) => {
@@ -26,10 +44,21 @@ export default (state = initialState, action) => {
         ...state,
         wallet: action.wallet
       }
+    case TX_NEW_BLOCK:
+      return {
+        ...state,
+        block: action.block
+      }
     case TX_REMAINING:
       return {
         ...state,
         remaining: action.remaining
+      }
+    case TX_ERROR:
+      return {
+        ...state,
+        error: action.error,
+        pricesFetch: false
       }
     case TX_RESULT:
       return {
@@ -42,21 +71,112 @@ export default (state = initialState, action) => {
         ...state,
         urls: state.urls.set(action.url, action.add)
       }
+    case TX_PRICES_FETCH:
+      return {
+        ...state,
+        pricesFetch: true
+      }
+    case TX_PRICES:
+      return {
+        ...state,
+        value: action.value,
+        valuePrice: action.valuePrice,
+        txPrice: action.txPrice,
+        totalPrice: action.totalPrice,
+        multiTotalPrice: action.multiTotalPrice,
+        txEthPrice: action.txEthPrice,
+        totalEthPrice: action.totalEthPrice,
+        multiTotalEthPrice: action.multiTotalEthPrice,
+        usdRate: action.usdRate
+      }
     default:
       return state
   }
 }
 
+const commonWeb3 = new Web3(new Web3.providers.HttpProvider(PRIMARY_URL))
+Web3Provider.setWeb3(commonWeb3)
+
+setInterval(async () => {
+  store.dispatch({type: TX_NEW_BLOCK, block: await Web3Provider.getBlockNumber()})
+}, 3000)
+
+const BLOCK_DELAY = 2
+
+const toWei = (v) => v * 1000000000000000000
+const fromWei = (v) => v / 1000000000000000000
+
+const getCheckedURLs = (urls) => {
+  urls = urls.toObject()
+  let result = []
+  for (let i in urls) {
+    if (urls.hasOwnProperty(i)) {
+      if (urls[i] === 1) {
+        result.push(i)
+      }
+    }
+  }
+  return result
+}
+
 export const setWallet = (wallet) => ({type: TX_SET_WALLET, wallet})
 export const toggleURL = (url, add) => ({type: TX_TOGGLE_URL, url, add})
 
-export const transaction = (urls, from, to, value, data, gasPrice, block, wallet, password) => async (dispatch) => {
-  urls = Object.keys(urls.toJS())
+export const updateTxPrices = (to, value, data) => async (dispatch, getState) => {
+  if (!to || !(value || data)) {
+    return
+  }
 
+  dispatch({type: TX_ERROR, error: null})
+  dispatch({type: TX_PRICES_FETCH})
+
+  const prices = await axios.get('https://coinmarketcap-nexuist.rhcloud.com/api/eth')
+  let usdRate = fromWei(prices.data.price.usd)
+
+  value = toWei(value)
+
+  commonWeb3.eth.getGasPrice((error, gasPrice) => {
+    if (error) {
+      dispatch({type: TX_ERROR, error: 'Get gas price error: ' + error.message})
+      return
+    }
+    const valuePrice = Math.round((value * usdRate) * 100) / 100
+
+    commonWeb3.eth.estimateGas({to, value, data}, (error, estimateGas) => {
+      if (error) {
+        dispatch({type: TX_ERROR, error: 'Estimate gas error: ' + error.message})
+        return
+      }
+
+      const providersNum = getCheckedURLs(getState().get('tx').urls).length
+
+      const txPrice = Math.round((estimateGas * gasPrice * usdRate) * 100) / 100
+      const totalPrice = valuePrice + txPrice
+      const multiTotalPrice = totalPrice * providersNum
+
+      const txEthPrice = fromWei(estimateGas * gasPrice)
+      const totalEthPrice = fromWei(value) + txEthPrice
+      const multiTotalEthPrice = totalEthPrice * providersNum
+
+      dispatch({
+        type: TX_PRICES,
+        valuePrice, txPrice, totalPrice, multiTotalPrice, usdRate: prices.data.price.usd,
+        value: fromWei(value), txEthPrice, totalEthPrice, multiTotalEthPrice
+      })
+    })
+  })
+}
+
+export const transaction = (urls, from, to, value, data, block, wallet, password) => async (dispatch) => {
   dispatch({type: TX_REMAINING, remaining: 0}) // show processing...
 
+  urls = getCheckedURLs(urls)
+  value = toWei(value)
+  block = parseInt(block, 10)
+
   let first = true
-  let remaining = urls.length
+  let remainingTxs = urls.length
+  let remainingBlocks = 0
 
   let result = new Immutable.List()
 
@@ -66,8 +186,8 @@ export const transaction = (urls, from, to, value, data, gasPrice, block, wallet
       provider = walletProvider(wallet, password, url)
     } catch (error) {
       result = result.push([url, error.toString()])
-      remaining--
-      if (remaining === 0) {
+      remainingTxs--
+      if (remainingTxs === 0) {
         dispatch({type: TX_RESULT, result})
       }
       continue
@@ -76,22 +196,21 @@ export const transaction = (urls, from, to, value, data, gasPrice, block, wallet
     const web3 = new Web3()
     web3.setProvider(provider)
 
-    Web3Provider.setWeb3(web3)
-
     if (first) {
       const currentBlock = await Web3Provider.getBlockNumber()
-      dispatch({type: TX_REMAINING, remaining: block - currentBlock - BLOCK_DELAY})
+      remainingBlocks = block - currentBlock - BLOCK_DELAY
+      dispatch({type: TX_REMAINING, remaining: remainingBlocks})
     }
 
     const callback = () => {
-      web3.eth.sendTransaction({from, to, value, gasPrice, data}, function (error, hash) {
+      web3.eth.sendTransaction({from, to, value, data}, function (error, hash) {
         if (error) {
           result = result.push([url, error.toString()])
         } else {
           result = result.push([url, hash])
         }
-        remaining--
-        if (remaining === 0) {
+        remainingTxs--
+        if (remainingTxs === 0) {
           dispatch({type: TX_RESULT, result})
         }
       })
@@ -105,11 +224,12 @@ export const transaction = (urls, from, to, value, data, gasPrice, block, wallet
       const blockData = await Web3Provider.getBlock(r, true)
       const currentBlock = blockData.number
 
-      if (first) {
-        dispatch({type: TX_REMAINING, remaining: block - currentBlock - BLOCK_DELAY})
+      if (block - currentBlock - BLOCK_DELAY < remainingBlocks) {
+        remainingBlocks = block - currentBlock - BLOCK_DELAY
+        dispatch({type: TX_REMAINING, remaining: remainingBlocks})
       }
 
-      if (true || block - currentBlock <= BLOCK_DELAY) { // TODO
+      if (block - currentBlock <= BLOCK_DELAY) {
         filter.stopWatching(() => {})
         callback()
       }
