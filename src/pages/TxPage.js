@@ -13,7 +13,7 @@ const mapStateToProps = (state) => ({
 })
 
 const mapDispatchToProps = (dispatch) => ({
-  tx: (urls, from, to, value, data, block, wallet, password) => dispatch(transaction(urls, from, to, value, data, block, wallet, password))
+  tx: (urls, from, to, value, data, block, wallet, password, gasPrice) => dispatch(transaction(urls, from, to, value, data, block, wallet, password, gasPrice))
 })
 
 @connect(mapStateToProps, mapDispatchToProps)
@@ -27,7 +27,8 @@ class TxPage extends Component {
       values.get('data'),
       values.get('block'),
       this.props.wallet,
-      values.get('password')
+      values.get('password'),
+      values.get('gasPrice')
     )
   }
 

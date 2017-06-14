@@ -2,7 +2,7 @@ import Immutable from 'immutable'
 import Web3 from 'web3'
 import walletProvider from '../../network/walletProvider'
 import Web3Provider from '../../network/Web3Provider'
-import { store } from '../configureStore'
+import {store} from '../configureStore'
 import axios from 'axios'
 
 const TX_SET_WALLET = 'tx/SET_WALLET'
@@ -16,6 +16,9 @@ const TX_PRICES_FETCH = 'tx/PRICES_FETCH'
 
 const PRIMARY_URL = 'https://mainnet.infura.io/PVe9zSjxTKIP3eAuAHFA'
 
+const commonWeb3 = new Web3(new Web3.providers.HttpProvider(PRIMARY_URL))
+Web3Provider.setWeb3(commonWeb3)
+
 const initialState = {
   wallet: null,
   remaining: null,
@@ -24,6 +27,7 @@ const initialState = {
   urls: new Immutable.Map({
     [PRIMARY_URL]: 1 /** PUT YOUR URLS HERE */
   }),
+  gasPrice: commonWeb3.eth.gasPrice,
   pricesFetch: false,
   error: null,
   value: null,
@@ -94,9 +98,6 @@ export default (state = initialState, action) => {
   }
 }
 
-const commonWeb3 = new Web3(new Web3.providers.HttpProvider(PRIMARY_URL))
-Web3Provider.setWeb3(commonWeb3)
-
 setInterval(async () => {
   store.dispatch({type: TX_NEW_BLOCK, block: await Web3Provider.getBlockNumber()})
 }, 3000)
@@ -122,7 +123,7 @@ const getCheckedURLs = (urls) => {
 export const setWallet = (wallet) => ({type: TX_SET_WALLET, wallet})
 export const toggleURL = (url, add) => ({type: TX_TOGGLE_URL, url, add})
 
-export const updateTxPrices = (to, value, data) => async (dispatch, getState) => {
+export const updateTxPrices = (to, value, data, gasPrice) => async (dispatch, getState) => {
   if (!to || !(value || data)) {
     return
   }
@@ -135,39 +136,33 @@ export const updateTxPrices = (to, value, data) => async (dispatch, getState) =>
 
   value = toWei(value)
 
-  commonWeb3.eth.getGasPrice((error, gasPrice) => {
+  const valuePrice = Math.round((value * usdRate) * 100) / 100
+
+  commonWeb3.eth.estimateGas({to, value, data}, (error, estimateGas) => {
     if (error) {
-      dispatch({type: TX_ERROR, error: 'Get gas price error: ' + error.message})
+      dispatch({type: TX_ERROR, error: 'Estimate gas error: ' + error.message})
       return
     }
-    const valuePrice = Math.round((value * usdRate) * 100) / 100
 
-    commonWeb3.eth.estimateGas({to, value, data}, (error, estimateGas) => {
-      if (error) {
-        dispatch({type: TX_ERROR, error: 'Estimate gas error: ' + error.message})
-        return
-      }
+    const providersNum = getCheckedURLs(getState().get('tx').urls).length
 
-      const providersNum = getCheckedURLs(getState().get('tx').urls).length
+    const txPrice = Math.round((estimateGas * gasPrice * usdRate) * 100) / 100
+    const totalPrice = valuePrice + txPrice
+    const multiTotalPrice = totalPrice * providersNum
 
-      const txPrice = Math.round((estimateGas * gasPrice * usdRate) * 100) / 100
-      const totalPrice = valuePrice + txPrice
-      const multiTotalPrice = totalPrice * providersNum
+    const txEthPrice = fromWei(estimateGas * gasPrice)
+    const totalEthPrice = fromWei(value) + txEthPrice
+    const multiTotalEthPrice = totalEthPrice * providersNum
 
-      const txEthPrice = fromWei(estimateGas * gasPrice)
-      const totalEthPrice = fromWei(value) + txEthPrice
-      const multiTotalEthPrice = totalEthPrice * providersNum
-
-      dispatch({
-        type: TX_PRICES,
-        valuePrice, txPrice, totalPrice, multiTotalPrice, usdRate: prices.data.price.usd,
-        value: fromWei(value), txEthPrice, totalEthPrice, multiTotalEthPrice
-      })
+    dispatch({
+      type: TX_PRICES,
+      valuePrice, txPrice, totalPrice, multiTotalPrice, usdRate: prices.data.price.usd,
+      value: fromWei(value), txEthPrice, totalEthPrice, multiTotalEthPrice
     })
   })
 }
 
-export const transaction = (urls, from, to, value, data, block, wallet, password) => async (dispatch) => {
+export const transaction = (urls, from, to, value, data, block, wallet, password, gasPrice) => async (dispatch) => {
   dispatch({type: TX_REMAINING, remaining: 0}) // show processing...
 
   urls = getCheckedURLs(urls)
@@ -203,7 +198,7 @@ export const transaction = (urls, from, to, value, data, block, wallet, password
     }
 
     const callback = () => {
-      web3.eth.sendTransaction({from, to, value, data}, function (error, hash) {
+      web3.eth.sendTransaction({from, to, value, gasPrice, data}, function (error, hash) {
         if (error) {
           result = result.push([url, error.toString()])
         } else {
@@ -230,7 +225,8 @@ export const transaction = (urls, from, to, value, data, block, wallet, password
       }
 
       if (block - currentBlock <= BLOCK_DELAY) {
-        filter.stopWatching(() => {})
+        filter.stopWatching(() => {
+        })
         callback()
       }
     })

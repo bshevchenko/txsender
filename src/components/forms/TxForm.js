@@ -21,13 +21,15 @@ const mapStateToProps = (state) => ({
   totalEthPrice: state.get('tx').totalEthPrice,
   multiTotalEthPrice: state.get('tx').multiTotalEthPrice,
   usdRate: state.get('tx').usdRate,
-  initialValues: {}
+  initialValues: {
+    gasPrice: state.get('tx').gasPrice
+  }
 })
 
 const mapDispatchToProps = (dispatch) => ({
   setWallet: (wallet) => dispatch(setWallet(wallet)),
   toggleURL: (url, add) => dispatch(toggleURL(url, add)),
-  updateTxPrices: (to, value, data) => dispatch(updateTxPrices(to, value, data))
+  updateTxPrices: (to, value, data, gasPrice) => dispatch(updateTxPrices(to, value, data, gasPrice))
 })
 
 @connect(mapStateToProps, mapDispatchToProps, null, {withRef: true})
@@ -37,6 +39,7 @@ const mapDispatchToProps = (dispatch) => ({
     const errors = {}
     errors.to = validator.address(values.get('to'), false)
     errors.value = validator.positiveNumberOrZero(values.get('value'), false)
+    errors.gasPrice = validator.positiveInt(values.get('gasPrice'))
 
     if (values.get('data') && !/^0x[0-9a-f]+$/.test(values.get('data'))) {
       errors.data = 'Should be valid hex code starting with the 0x'
@@ -67,19 +70,23 @@ class TxPage extends Component {
 
   handleURLCheck = (e, isInputChecked) => {
     this.props.toggleURL(e.target.value, isInputChecked)
-    this.props.updateTxPrices(this.refs.to.value, this.refs.value.value, this.refs.data.value)
+    this.props.updateTxPrices(this.refs.to.value, this.refs.value.value, this.refs.data.value, this.refs.gasPrice.value)
   }
 
   handleToChange = (e, newValue) => {
-    this.props.updateTxPrices(newValue, this.refs.value.value, this.refs.data.value)
+    this.props.updateTxPrices(newValue, this.refs.value.value, this.refs.data.value, this.refs.gasPrice.value)
   }
 
   handleValueChange = (e, newValue) => {
-    this.props.updateTxPrices(this.refs.to.value, newValue, this.refs.data.value)
+    this.props.updateTxPrices(this.refs.to.value, newValue, this.refs.data.value, this.refs.gasPrice.value)
   }
 
   handleDataChange = (e, newValue) => {
-    this.props.updateTxPrices(this.refs.to.value, this.refs.value.value, newValue)
+    this.props.updateTxPrices(this.refs.to.value, this.refs.value.value, newValue, this.refs.gasPrice.value)
+  }
+
+  handleGasPriceChange = (e, newValue) => {
+    this.props.updateTxPrices(this.refs.to.value, this.refs.value.value, this.refs.data.value, newValue)
   }
 
   render() {
@@ -91,6 +98,8 @@ class TxPage extends Component {
                onChange={this.handleValueChange}/>
         <Field component={TextField} style={{width: '100%'}} ref='data' name='data' floatingLabelText='Data'
                onChange={this.handleDataChange}/>
+        <Field component={TextField} style={{width: '100%'}} ref='gasPrice' name='gasPrice' floatingLabelText='Gas Price (wei)'
+               onChange={this.handleGasPriceChange}/>
 
         {this.props.txError ? <p style={{color: 'rgb(244, 67, 54)'}}>{this.props.txError}</p> : ''}
 
